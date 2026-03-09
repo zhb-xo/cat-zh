@@ -13,12 +13,6 @@
     "lint": "eslint *.js js/*.js --quiet",
     "start": "http-server"
   },
-  "husky": {
-    "hooks": {
-      "pre-commit": "yarn lint",
-      "commit-msg": "echo 'commitlint -E HUSKY_GIT_PARAMS'"
-    }
-  },
   "repository": {
     "type": "git",
     "url": "git+ssh://git@bitbucket.org/bloodrizer/kitten-game.git"

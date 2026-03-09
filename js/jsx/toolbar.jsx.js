@@ -24,35 +24,7 @@ WToolbarIconContainer = React.createClass({
         var getTooltip = this.props.getTooltip;
         var game = this.props.game;
 
-		var tooltip = dojo.byId("tooltip");
-		dojo.empty(tooltip);
-
-		dojo.connect(container, "onmouseover", this, function(event){
-			 game.tooltipUpdateFunc = function(){
-				tooltip.innerHTML = getTooltip();
-			 };
-			 game.tooltipUpdateFunc();
-
-			 var target = event.originalTarget || event.toElement;
-			 var pos = $(target).offset();
-			 if (!pos){
-				 return;
-			 }
-
-			 dojo.style(tooltip, "left", pos.left + "px");
-			 dojo.style(tooltip, "top",  pos.top + "px");
-
-			 dojo.style(tooltip, "display", "");
-			 dojo.style(container, "fontWeight", "bold");
-
-	    });
-
-		dojo.connect(container, "onmouseout", this, function(){
-			 game.tooltipUpdateFunc = null;
-			 dojo.style(tooltip, "display", "none");
-			 dojo.style(container, "fontWeight", "normal");
-		});
-
+        UIUtils.attachTooltip(game, container, 0, 100, getTooltip);
 	}
 })
 
@@ -78,9 +50,10 @@ WToolbarHappiness = React.createClass({
         this.game = this.props.game;    //hack
 
         var base = this.game.getEffect("happiness");
-		//var population = this.game.village.getKittens() *  2;
-		var tooltip = $I("village.happiness.base") + ": 100%<br>" +
-			   $I("village.happiness.buildings") + ": +" + (Math.floor(base)) + "%<br>";
+		var challengeHappiness = this.game.getEffect("challengeHappiness");
+		// "base" is usually 100%, but it gets reduced in certain Challenges
+		var tooltip = $I("village.happiness.base") + ": " + this.game.getDisplayValueExt(100 + challengeHappiness, false, false, 0) + "%<br>";
+		tooltip += $I("village.happiness.buildings") + ": +" + (Math.floor(base)) + "%<br>";
 
 		//----------------------
 		var resHappiness = 0;
@@ -101,9 +74,9 @@ WToolbarHappiness = React.createClass({
 		}
 		tooltip += $I("village.happiness.rare.resources") + ": +" + this.game.getDisplayValueExt(resHappiness, false, false, 0) + "%<br>";
 		//---------------------
-		var karma = this.game.resPool.get("karma");
-		if (karma.value > 0){
-			tooltip += $I("village.happiness.karma") + ": +" + this.game.getDisplayValueExt(karma.value, false, false, 0) + "%<br>";
+		var karma = this.game.village.getHappinessFromKarma();
+		if (karma > 0){
+			tooltip += $I("village.happiness.karma") + ": +" + this.game.getDisplayValueExt(karma, false, false, 0) + "%<br>";
 		}
 
 		if (this.game.calendar.festivalDays > 0){
@@ -119,7 +92,7 @@ WToolbarHappiness = React.createClass({
         tooltip += "* " + $I("village.happiness.penalty.base") + ": -" + this.game.getDisplayValueExt(unhappiness, false, false, 0) + "%<br>";
 		tooltip += "* " + $I("village.happiness.penalty.mitigated") + ": " + this.game.getDisplayValueExt(-unhappinessReduction, false, false, 0) + "%<br>";
         tooltip += $I("village.happiness.environment") + ": " + this.game.getDisplayValueExt(environmentEffect, false, false, 0) + "%<br>";
-        var overpopulation = this.game.village.getKittens() - this.game.village.maxKittens;
+        var overpopulation = this.game.village.getOverpopulation();
         if (overpopulation > 0){
             tooltip += $I("village.happiness.overpopulation") + ": -" + overpopulation * 2 + "%<br>";
         }
@@ -234,10 +207,10 @@ WToolbarPollution = React.createClass({
         var polLvl = game.bld.getPollutionLevel();
         var polLvlShow = game.bld.getPollutionLevel(pollution * 2);
         if (polLvl >= 4){
-            message += $I("pollution.level1") + "<br/>" + $I("pollution.level2") + "<br/>" + $I("pollution.level3", [game.getDisplayValueExt(game.villageTab.getVillageTitle(), false, false, 0)]) + "<br/>" + $I("pollution.level4");
+            message += $I("pollution.level1") + "<br/>" + $I("pollution.level2") + "<br/>" + $I("pollution.level3", [game.villageTab.getVillageTitle()]) + "<br/>" + $I("pollution.level4");
         }
         else if (polLvlShow == 3 || polLvl == 3){
-            message += $I("pollution.level1") + "<br/>" + $I("pollution.level2") + "<br/>" + $I("pollution.level3", [game.getDisplayValueExt(game.villageTab.getVillageTitle(), false, false, 0)]);
+            message += $I("pollution.level1") + "<br/>" + $I("pollution.level2") + "<br/>" + $I("pollution.level3", [game.villageTab.getVillageTitle()]);
         }
         else if (polLvlShow == 2){
             message += $I("pollution.level1") + "<br/>" + $I("pollution.level2");
@@ -342,13 +315,14 @@ WLoginForm = React.createClass({
         return {
             login: null,
             password: null,
+            error: null,
             isLoading: false
         }
     },
 
     render: function(){
         if (this.state.isLoading){
-            return $r("span", null, "Loading...");
+            return $r("span", null, "加载中...");
         }
         var game = this.props.game;
         if (game.server.userProfile){
@@ -379,14 +353,16 @@ WLoginForm = React.createClass({
             {onClick: function (e){ e.stopPropagation(); }},
             [
                 $r("div", {className: "row"}, [
-                    "Email:",
+                    $r("label", {for:"kgnet-email"}, "邮箱:"),
                         $r("input", {
+                            id:"kgnet-email",
                             type: "email",
                             onChange: this.setLogin,
                             value: this.state.login
                         } ),
-                    "Password:",
+                    $r("label", {for:"kgnet-password"}, "密码:"),
                         $r("input", {
+                            id:"kgnet-password",
                             type: "password",
                             onChange: this.setPassword,
                             value: this.state.password
@@ -396,11 +372,17 @@ WLoginForm = React.createClass({
                     $r("a", {
                         href:"#",
                         onClick: this.login
-                    }, "login"),
+                    }, "登录"),
                     $r("a", {
-                        target: "_blank",
-                        href: "http://kittensgame.com/ui/register"
-                    }, "register")
+                        onClick: function(e){
+                            e.stopPropagation();
+                            game.ui.showDialog("registerDiv");
+                        },
+                    }, "注册"),
+                    $r("span", {paddingTop:"10px"}, "选项里可以导出导入存档")
+                ]),
+                this.state.error && $r("div", {className: "row"}, [
+                    $r("span", {className:"error"}, this.state.error)
                 ])
             ]
         )
@@ -425,11 +407,14 @@ WLoginForm = React.createClass({
     login: function(){
         var self = this;
 
-        this.setState({isLoading: true});
+        let msg = game.msg('云存档因为网络原因会比较麻烦<br>推荐游戏存档是从右上角选项导出导入<br>云存档在官方国外服务器上，白天可能需要木弟子<br>如果一直卡加载中可以用木弟子在网站登录:<br>https://kittensgame.com/ui/login');
+        $(msg.span).css('color', "#ff589c");
+        self.setState({error: null, isLoading: true});
         $.ajax({
             cache: false,
             type: "POST",
             dataType: "JSON",
+            timeout: 30000,
             data: {
                 email: this.state.login,
                 password: this.state.password
@@ -442,14 +427,27 @@ WLoginForm = React.createClass({
 		}).done(function(resp){
             if (resp.id){
                 self.props.game.server.setUserProfile(resp);
-            }
-		}).always(function(){
+            } else {
+                self.setState({error: resp.error})
+			}
+		}).fail(function(resp, status){
+            console.error("something went wrong, resp:", resp, status)
+            self.setState({error: resp.responseText || "There was a problem connecting the server"})
+        }).always(function(){
             self.setState({isLoading: false});
         });
     }
 });
 
 WCloudSaveRecord = React.createClass({
+
+    getInitialState: function(){
+        return {
+            showActions: false,
+            isEditable: false,
+            label: this.props.save.label
+        }
+    },
 
     bytesToSize(bytes) {
         var sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
@@ -467,9 +465,47 @@ WCloudSaveRecord = React.createClass({
 
         var self = this;
 
-        return $r("div", {className:"save-record"}, [
+        return $r("div", {className:"save-record " + (save.archived ? "archived" : "")}, [
             $r("div", {className:"save-record-cell"},
-                $r("a", { }, guid.substring(guid.length-4, guid.length)),
+                this.state.isEditable ? 
+                    $r("input", {
+                        onClick: function(e){
+                            e.stopPropagation();
+                        },
+                        onChange: function(e){
+                            self.setState({
+                                label: e.target.value
+                            });
+                        },
+                        onKeyPress: function(e){
+                            console.log("foo");
+                            //TODO: set save label
+                            if(e.key === 'Enter'){
+                                game.server.pushSaveMetadata(
+                                    save.guid,
+                                    {
+                                        label: self.state.label
+                                    }
+                                ).then(function(){
+                                    //force sync-up of the game's server state with UI
+                                    //(pushMetadata should return a new save snapshot)
+                                    self.forceUpdate();
+                                });
+                                self.setState({
+                                    isEditable: false
+                                });
+                            }
+                        }
+                     }) :
+                    $r("a", { 
+                        onClick: function(e){
+                            e.stopPropagation();
+                            self.setState({
+                                isEditable: !self.state.isEditable
+                            })
+                        }
+                    }, save.label || guid.substring(guid.length-4, guid.length))
+                ,
                 isActiveSave ? "[" + $I("ui.kgnet.save.current") + "]" : ""
             ),
             $r("div", {className:"save-record-cell"},
@@ -495,18 +531,56 @@ WCloudSaveRecord = React.createClass({
             $r("a", {
                 className: "link",
                 title: "下载并加载云存档（你当前的存档会丢失）",
-                    onClick: function(e){
+                onClick: function(e){
                     e.stopPropagation();
                     game.ui.confirm("加载", "这会覆盖本地的存档。 确定/取消", function(){
                         game.server.loadSave(save.guid);
                     });
+					game.ui.render();
                 }}, $I("ui.kgnet.save.load")),
-                
+            $r("a", {
+                className: "link",
+                onClick: function(e){
+                    e.stopPropagation();
+                    self.setState({
+                        showActions: !self.state.showActions
+                    })
+                }
+            }, ".."),
+            this.state.showActions &&
+                $r("a", {
+                    onClick: function(e){
+                        e.stopPropagation();
+                        self.setState({
+                            isEditable: !self.state.isEditable
+                        })
+                }}, "更名"
+            ),
+            this.state.showActions &&
+                $r("a", { onClick: function(e){
+                    e.stopPropagation();
+                    game.server.pushSaveMetadata(
+                        save.guid,
+                        {
+                            archived: !save.archived
+                        }
+                    ).then(function(){
+                        //force sync-up of the game's server state with UI
+                        //(pushMetadata should return a new save snapshot)
+                        self.forceUpdate();
+                    });
+                }}, "归档")
         ]);
     }
 })
 
 WCloudSaves = React.createClass({
+
+    getInitialState: function(){
+        return {
+            isLoading: false
+        }
+    },
 
     render: function(){
         var self = this;
@@ -562,10 +636,23 @@ WCloudSaves = React.createClass({
                         title: "更新存档信息。这是安全按钮不会改变任何数据。",
                         onClick: function(e){
                             e.stopPropagation();
-                            game.server.syncSaveData();
+                            self.setState({isLoading: true})
+                            game.server.syncSaveData().always(function(){
+                                self.setState({isLoading: false})
+							}).fail(function(err) {
+								game.msg('获取存档信息失败，即将打开同步存档教程', "important");
+								var tempwindow = window.open();
+								tempwindow.location = 'https://lolitalibrary.com/wiki/?file=007-%E5%B8%B8%E8%A7%81%E9%97%AE%E9%A2%98/02-%E4%BA%91%E5%AD%98%E6%A1%A3';
+							});
                         }
-                    }, $I("ui.kgnet.sync")),
-                    $r("span", {paddingTop:"10px"}, $I("ui.kgnet.instructional"))
+                    }, 
+                        // (this.state.isLoading && "[loading..]"),
+                        (this.state.isLoading && "[加载中..]"),
+                        $I("ui.kgnet.sync")
+                    ),
+                    // todo
+                    // $r("span", {paddingTop:"10px"}, (saveData && saveData.length) ? $I("ui.kgnet.test") : $I("ui.kgnet.instructional")),
+                    (!saveData || !saveData.length) && $r("span", {paddingTop:"10px"}, $I("ui.kgnet.instructional"))
                 ])
             ])
         ])
@@ -589,15 +676,27 @@ WLogin = React.createClass({
         },
             $r("div",
                 {
-                    onClick: this.toggleExpanded
+                    onClick: this.toggleExpanded,
+                    onKeyDown: this.onKeyDown
                 },
                 [
-                    $r("span", {
-                        className: "kgnet-login-link status-indicator-" + (game.server.userProfile ? "online" : "offline")
-                        + (lastBackup >= 7 ? " freshMessage" : "")
-                    }, "* " + (game.server.userProfile ?
-                        $I("ui.kgnet.online") : $I("ui.kgnet.login")
-                    )),
+                    $r("a", {
+                        className: "kgnet-login-link-container",
+                        href:"#!",
+                        onClick: this.toggleExpanded,
+                    }, 
+                        $r("span", {
+                            className: "kgnet-login-link status-indicator-" + (game.server.userProfile ? "online" : "offline")
+                            + (lastBackup >= 7 ? " freshMessage" : "")
+                        }, [
+                            $r("div", {
+                                className: "svg-icon user"
+                            }),  
+                            (game.server.userProfile ?
+                            $I("ui.kgnet.online") : $I("ui.kgnet.login"))
+                        ]
+                        ),
+                    ),
                     this.state.isExpanded && $r("div", {
                         className: "login-popup button_tooltip tooltip-block"
                     },
@@ -620,6 +719,12 @@ WLogin = React.createClass({
         this.setState({
             isExpanded: !this.state.isExpanded
         })
+    },
+
+    onKeyDown: function(e){
+        if(e.key === "Escape") {
+            this.toggleExpanded()
+        }
     }
 });
 
@@ -647,7 +752,7 @@ WToolbar = React.createClass({
             $r(WToolbarHappiness, {game: this.state.game}),
             $r(WToolbarEnergy, {game: this.state.game}),
             $r(WBLS, {game: this.state.game}),
-            $r(WToolbarMOTD, {game: this.state.game}),
+            //$r(WToolbarMOTD, {game: this.state.game}),
             $r(WLogin, {game: this.state.game})
 
         );

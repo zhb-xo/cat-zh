@@ -25,10 +25,16 @@ WCollapsiblePanel = React.createClass({
                     className:  "left"
                     }, 
                     $r("a", {
+                            href: "#!",
                             className:"link collapse", 
-                            onClick: this.toggleCollapsed
+                            onClick: this.toggleCollapsed,
+                            tabindex: 1,
+                            title: this.props.title
                         },
-                        this.state.isCollapsed ? ">(" +  this.props.title + ")" : "v"
+                        this.state.isCollapsed ? ">(" +  this.props.title + ")" : 
+                        $r("div", {
+                            className: "svg-icon down"
+                        })
                     )
                 )
             ]),
@@ -44,57 +50,31 @@ WCollapsiblePanel = React.createClass({
 WResourceRow = React.createClass({
 
     getDefaultProperties: function(){
-        return {resource: null, isEditMode: false, isRequired: false, showHiddenResources: false};
+        return {resource: null, isEditMode: false, isRequired: false, showHiddenResources: false, isTemporalParadox: false};
     },
 
-    getInitialState: function(){
-        return {
-            visible: !this.props.resource.isHidden
-        };
-    },
-
-    //this is a bit ugly, probably React.PureComponent + immutable would be a much better approach
+    //I'm going for a solution that is technically less accurate, but is much simpler to understand.
+    //This function tells React to skip rendering for invisible resources.
+    //I think it's good enough for now.
     shouldComponentUpdate: function(nextProp, nextState){
-        var oldRes = this.oldRes || {},
-            newRes = nextProp.resource;
-
-        var isEqual = 
-            oldRes.value == newRes.value &&
-            oldRes.maxValue == newRes.maxValue &&
-            oldRes.perTickCached == newRes.perTickCached &&
-            this.props.isEditMode == nextProp.isEditMode &&
-            this.props.isRequired == nextProp.isRequired &&
-            this.props.showHiddenResources == nextProp.showHiddenResources &&
-            this.props.isTemporalParadox != nextProp.isTemporalParadox &&
-            this.state.visible == nextState.visible;
-
-        if (isEqual){
-            return false;
+        var newVisibility = this.getIsResInMainTable(nextProp.resource, nextProp);
+        if (this.oldVisibility !== newVisibility) {
+            //Remember new visibility state
+            this.oldVisibility = newVisibility;
+            //Resource will appear/disappear, therefore component should update
+            return true;
         }
-        this.oldRes = {
-            value: newRes.value,
-            maxValue: newRes.maxValue,
-            perTickCached: newRes.perTickCached
-        };
-        return true;
+        //Update component if it will be displayed
+        //Don't update component if it won't be displayed
+        return newVisibility;
     },
 
     render: function(){
         var res = this.props.resource;
 
-        if (!res.visible && !this.props.showHiddenResources){
+        //Only render this resource if it's unlocked, visible, etc.
+        if (!this.getIsResInMainTable()) {
             return null;
-        }
-
-        var hasVisibility = (res.unlocked || (res.name == "kittens" && res.maxValue));
-
-        if (!hasVisibility || (!this.state.visible && !this.props.isEditMode)){
-            return null;
-        }
-
-        //migrate dual resources (e.g. blueprint) to lower table once craft recipe is unlocked
-		if (game.resPool.isNormalCraftableResource(res) && game.workshop.getCraft(res.name).unlocked){
-			return null;
         }
 
         //wtf is this code
@@ -111,7 +91,9 @@ WResourceRow = React.createClass({
         var perTickVal = 
             game.getResourcePerTick(res.name, false) || 
             game.getResourcePerTickConvertion(res.name) ? 
-            game.getDisplayValueExt(perTick, true, false) + postfix : "";
+            game.getDisplayValueExt(perTick, true, false) + postfix : 
+            (res.calculatePerDay)? game.getDisplayValueExt((game.getResourcePerDay(res.name)), true, false) + "/" + $I("unit.d"):
+            (res.calculateOnYear)? game.getDisplayValueExt(game.getResourceOnYearProduction(res.name), true, false) + "/" + $I("unit.y"): "";
             // "(" + game.getDisplayValueExt(perTick, true, false) + postfix + ")" : "";
 
         //----------------------------------------------------------------------------
@@ -207,13 +189,21 @@ WResourceRow = React.createClass({
             (!res.visible ? " hidden" : "")
         ;
 
-        return $r("div", {className: resRowClass}, [
+        var resPercent = "";
+        if (res.maxValue) {
+            resPercent = ((res.value / res.maxValue) * 100).toFixed() + "%/" + game.getDisplayValueExt(res.maxValue);
+        } else {
+            //Display value with 1 digit of precision
+            resPercent = game.getDisplayValueExt(Math.round(res.value), false /*prefix*/, false /*perTickHack*/, 1);
+        }
+
+        return $r("div", {role: "row", className: resRowClass}, [
             this.props.isEditMode ? 
                 $r("div", {className:"res-cell"},
                     $r("input", {
                         type:"checkbox", 
-                        checked: this.state.visible,
-
+                        checked: this.getIsVisible(),
+                        title: "显示/隐藏 " + $I("resources." + res.name + ".title"),
                         onClick: this.toggleView,
                         style:{display:"inline-block"},
                     })
@@ -223,17 +213,20 @@ WResourceRow = React.createClass({
                 className:"res-cell resource-name", 
                 style:resNameCss,
                 onClick: this.onClickName,
-                title: res.title || res.name
+                title: (res.title || res.name) + " " + resPercent + " " + perTickVal,
+                role: "gridcell",
+                userFocus:"normal",
+                tabIndex: 0,
             }, 
                 res.title || res.name
             ),
-            $r("div", {className:"res-cell " + resAmtClassName + specialClass}, game.getDisplayValueExt(res.value)),
-            $r("div", {className:"res-cell maxRes"}, 
+            $r("div", {className:"res-cell " + resAmtClassName + specialClass, role: "gridcell"}, game.getDisplayValueExt(res.value)),
+            $r("div", {className:"res-cell maxRes", role: "gridcell"}, 
                 res.maxValue ? "/" + game.getDisplayValueExt(res.maxValue) : ""
             ),
-            $r("div", {className:"res-cell resPerTick", ref:"perTickNode"}, 
+            $r("div", {className:"res-cell resPerTick", role: "gridcell", ref:"perTickNode"}, 
                 isTimeParadox ? "???" : perTickVal),
-            $r("div", {className:"res-cell" + (weatherModCss ? " " + weatherModCss : "")}, weatherModValue)
+            $r("div", {className:"res-cell" + (weatherModCss ? " " + weatherModCss : ""), role: "gridcell"}, weatherModValue)
         ]);
     },
     onClickName: function(e){
@@ -243,36 +236,54 @@ WResourceRow = React.createClass({
     },
 
     toggleView: function(){
-        this.setState({visible: !this.state.visible});
-        this.props.resource.isHidden = this.state.visible; 
+        game.resPool.setResourceIsHidden(this.props.resource.name, !this.props.resource.isHidden);
+    },
+
+    //Parameter is optional.
+    //If not given, defaults to this.props.resource
+    getIsVisible: function(res) {
+        res = res || this.props.resource;
+        return !res.isHidden;
+    },
+
+    //Both parameters are optional.
+    //If not given, they default to this.props
+    getIsResInMainTable: function(res, props) {
+        res = res || this.props.resource;
+        props = props || this.props;
+
+        if (!res.visible && !props.showHiddenResources){
+            return false;
+        }
+        var hasVisibility = (res.unlocked || (res.name == "kittens" && res.maxValue));
+        if (!hasVisibility || (!this.getIsVisible(res) && !props.isEditMode)){
+            return false;
+        }
+        //migrate dual resources (e.g. blueprint) to lower table once craft recipe is unlocked
+        if (game.resPool.isNormalCraftableResource(res) && game.workshop.getCraft(res.name).unlocked){
+            return false;
+        }
+        //Else, resource is visible && unlocked && not displayed somewhere else instead:
+        return true;
     },
 
     componentDidMount: function(){
         var node = React.findDOMNode(this.refs.perTickNode);
         if (node){
-            this.tooltipNode = node;
+            this.refs.isTooltipAttached = true;
             game.attachResourceTooltip(node, this.props.resource);
         }
     },
 
     componentDidUpdate: function(prevProps, prevState){
-        if (!this.tooltipNode){
-            var node = React.findDOMNode(this.refs.perTickNode);
-            if (node){
-                this.tooltipNode = node;
-                game.attachResourceTooltip(node, this.props.resource);
-            }
+        var node = React.findDOMNode(this.refs.perTickNode);
+        if(this.refs.isTooltipAttached && !node) {
+            this.refs.isTooltipAttached = false;
         }
-    },
-
-    componentWillUnmount: function(){
-        if (!this.tooltipNode){
-            var node = React.findDOMNode(this.refs.perTickNode);
-            if (node){
-                this.tooltipNode = node;
-            }
+        if (node && !this.refs.isTooltipAttached) {
+            this.refs.isTooltipAttached = true;
+            game.attachResourceTooltip(node, this.props.resource);
         }
-        dojo.destroy(this.tooltipNode);
     }
 });
 
@@ -328,17 +339,16 @@ WCraftShortcut = React.createClass({
 
         var node = React.findDOMNode(this.refs.linkBlock);
         if (node && node.firstChild){
-            this.tooltipNode = node;
-
             UIUtils.attachTooltip(game, node.firstChild, 0, 60, dojo.partial( function(recipe){
 				var tooltip = dojo.create("div", { className: "button_tooltip" }, null);
 				var prices = game.workshop.getCraftPrice(recipe);
 
 				var allCount = game.workshop.getCraftAllCount(recipe.name);
 				var ratioCount = Math.floor(allCount * ratio);
-				if (num < ratioCount){
-					num = ratioCount;
-				}
+
+				//num (craftFixed) specifies the minimum number of crafts
+				//But we want it to scale up with ratioCount as well
+				var craftRowAmt = Math.max(num, ratioCount);
 
 				for (var i = 0; i < prices.length; i++){
 					var price = prices[i];
@@ -352,7 +362,7 @@ WCraftShortcut = React.createClass({
 						}, priceItemNode );
 
 					dojo.create("span", {
-							innerHTML: game.getDisplayValueExt(price.val * num),
+							innerHTML: game.getDisplayValueExt(price.val * craftRowAmt),
 							style: {float: "right", paddingLeft: "6px" }
 						}, priceItemNode );
 				}
@@ -363,9 +373,11 @@ WCraftShortcut = React.createClass({
 
     hasMinAmt: function(recipe){
 		var minAmt = Number.MAX_VALUE;
-		for (var j = 0; j < recipe.prices.length; j++){
-			var totalRes = game.resPool.get(recipe.prices[j].name).value;
-			var allAmt = Math.floor(totalRes / recipe.prices[j].val);
+        var craftPrices = game.workshop.getCraftPrice(recipe); //Get price as modified by upgrades
+
+		for (var j = 0; j < craftPrices.length; j++){
+			var totalRes = game.resPool.get(craftPrices[j].name).value;
+			var allAmt = Math.floor(totalRes / craftPrices[j].val);
 			if (allAmt < minAmt){
 				minAmt = allAmt;
 			}
@@ -405,37 +417,31 @@ WCraftShortcut = React.createClass({
 WCraftRow = React.createClass({
 
     getDefaultProperties: function(){
-        return {resource: null, isEditMode: false};
+        return {resource: null, isEditMode: false, isRequired: false};
     },
 
-    getInitialState: function(){
-        return {visible: !this.props.resource.isHidden};
-    },
-
+    //I'm going for a solution that is technically less accurate, but is much simpler to understand.
+    //This function tells React to skip rendering for invisible resources.
+    //I think it's good enough for now.
     shouldComponentUpdate: function(nextProp, nextState){
-        var newRes = nextProp.resource;
-
-        /*var isEqual = 
-            oldRes.value == newRes.value &&
-            this.props.isEditMode == nextProp.isEditMode &&
-            this.props.isRequired == nextProp.isRequired &&
-            this.state.visible == nextState.visible;
-
-        if (isEqual){
-            return false;
-        }*/
-        this.oldRes = {
-            value: newRes.value,
-        };
-        return true;
+        var newVisibility = this.getIsResInCraftTable(nextProp.resource, nextProp);
+        if (this.oldVisibility !== newVisibility) {
+            //Remember new visibility state
+            this.oldVisibility = newVisibility;
+            //Resource will appear/disappear, therefore component should update
+            return true;
+        }
+        //Update component if it will be displayed
+        //Don't update component if it won't be displayed
+        return newVisibility;
     },
 
     render: function(){
         var res = this.props.resource;
-
         var recipe = game.workshop.getCraft(res.name);
-        var hasVisibility = (res.unlocked && recipe.unlocked /*&& this.workshop.on > 0*/);
-        if (!hasVisibility || (!this.state.visible && !this.props.isEditMode)){
+
+        //Only render if this resource is unlocked, not marked as hidden, etc.
+        if (!this.getIsResInCraftTable()) {
             return null;
         }
 
@@ -471,7 +477,7 @@ WCraftRow = React.createClass({
                 $r("div", {className:"res-cell"},
                     $r("input", {
                         type:"checkbox", 
-                        checked: this.state.visible,
+                        checked: this.getIsVisible(),
                         onClick: this.toggleView,
                         style:{display:"inline-block"},
                     })
@@ -498,25 +504,55 @@ WCraftRow = React.createClass({
     },
 
     toggleView: function(){
-        this.setState({visible: !this.state.visible});
-        this.props.resource.isHidden = this.state.visible; 
+        var res = this.props.resource;
+        if (res.name == "wood") {
+            res.isHiddenFromCrafting = !res.isHiddenFromCrafting;
+        } else {
+            res.isHidden = !res.isHidden;
+        }
+    },
+
+    //Parameter is optional.
+    //If not given, defaults to this.props.resource
+    getIsVisible: function(res) {
+        res = res || this.props.resource;
+        if (res.name == "wood") {
+            //(Wood is special because it appears twice, separately)
+            return !res.isHiddenFromCrafting;
+        }
+        return !res.isHidden;
+    },
+
+    //Both parameters are optional.
+    //If not given, they default to this.props
+    getIsResInCraftTable: function(res, props) {
+        res = res || this.props.resource;
+        props = props || this.props;
+
+        var recipe = game.workshop.getCraft(res.name);
+        var hasVisibility = (res.unlocked && recipe.unlocked);
+        if (!hasVisibility || (!this.getIsVisible(res) && !props.isEditMode)){
+            return false;
+        }
+        return true;
     },
 
     componentDidMount: function(){
         var node = React.findDOMNode(this.refs.perTickNode);
         if (node){
-            this.tooltipNode = node;
+            this.refs.isTooltipAttached = true;
             game.attachResourceTooltip(node, this.props.resource);
         }
     },
 
     componentDidUpdate: function(prevProps, prevState){
-        if (!this.tooltipNode){
-            var node = React.findDOMNode(this.refs.perTickNode);
-            if (node){
-                this.tooltipNode = node;
-                game.attachResourceTooltip(node, this.props.resource);
-            }
+        var node = React.findDOMNode(this.refs.perTickNode);
+        if(this.refs.isTooltipAttached && !node) {
+            this.refs.isTooltipAttached = false;
+        }
+        if (node && !this.refs.isTooltipAttached) {
+            this.refs.isTooltipAttached = true;
+            game.attachResourceTooltip(node, this.props.resource);
         }
     }
 });
@@ -532,8 +568,7 @@ WResourceTable = React.createClass({
     getInitialState: function(){
         return {
             isEditMode: false,
-            isCollapsed: false,
-            showHiddenResources: false
+            isCollapsed: false
         };
     },
     render: function(){
@@ -547,32 +582,48 @@ WResourceTable = React.createClass({
                     resource: res, 
                     isEditMode: this.state.isEditMode, 
                     isRequired: isRequired,
-                    showHiddenResources: this.state.showHiddenResources,
+                    showHiddenResources: game.resPool.showHiddenResources,
                     isTemporalParadox: game.calendar.day < 0
                 })
             );
         }
         //TODO: mixing special stuff like fatih and such here
         
-        return $r("div", null, [
+        return $r("div", {ariaLabel:"Regular resources"}, [
             $r("div", null,[
                 $r("div", {
                     className:"res-toolbar left"
                 }, 
                     $r("a", {
+                            href: "#!", 
                             className:"link collapse", 
-                            onClick: this.toggleCollapsed
+                            onClick: this.toggleCollapsed,
+                            tabindex: 1,
+                            title: "显示/隐藏资源",
                         },
-                        this.state.isCollapsed ? ">(" + $I("left.resources") + ")" : "v"
+                        this.state.isCollapsed ? ">(" + $I("left.resources") + ")" : $r("div", {
+                            className: "svg-icon down"
+                        })
                     )
                 ),
                 $r("div", {className:"res-toolbar right"}, 
                     $r("a", {
                         className: "link" + (this.state.isEditMode ? " toggled" : ""), 
-                        onClick: this.toggleEdit
-                    }, "⚙"),
-                    $r(WTooltip, {body:"?"}, 
-                        $I("left.resources.tip"))
+                        onClick: this.toggleEdit,
+                        onKeyDown: this.onKeyDown,
+                        title:  "资源设置",
+                        tabIndex: 1
+                    }, 
+                        $r("div", {
+                            className: "svg-icon gear"
+                        })
+                    ),
+                    $r(WTooltip, {body:
+                        $r("div", {
+                            className: "svg-icon question-mark"
+                        }), 
+                    tabindex: 1}, 
+                    $I("left.resources.tip"))
                 
                 )
             ]),
@@ -582,7 +633,7 @@ WResourceTable = React.createClass({
                         $r("a", {className:"link", onClick: game.ui.zoomUp.bind(game.ui)}, $I("left.font.inc")),
                         $r("a", {className:"link", onClick: game.ui.zoomDown.bind(game.ui)}, $I("left.font.dec")),
                     ]),
-                    $r("div", {className:"res-table"}, resRows)
+                    $r("div", {className:"res-table", role: "grid"}, resRows)
                 ]),
 
             //TODO: this stuff should not be exposed to beginner player to not overwhelm them
@@ -591,13 +642,19 @@ WResourceTable = React.createClass({
             $r("div", {className:"res-toggle-hidden"}, [
                 $r("input", {
                     type:"checkbox", 
-                    checked: this.state.showHiddenResources,
+                    checked: game.resPool.showHiddenResources,
                     onClick: this.toggleHiddenResources,
                     style:{display:"inline-block"},
                 }),
                 $I("res.show.hidden")
             ])
         ]);
+    },
+
+    onKeyDown: function(event){
+        if (event.keyCode == 13){
+            this.toggleEdit();
+        }
     },
 
     toggleEdit: function(){
@@ -609,7 +666,7 @@ WResourceTable = React.createClass({
     },
 
     toggleHiddenResources: function(e){
-        this.setState({showHiddenResources: e.target.checked});
+        game.resPool.showHiddenResources = e.target.checked;
     }
 });
 
@@ -644,23 +701,35 @@ WCraftTable = React.createClass({
             return null;
         }
 
-        return $r("div", null, [
+        return $r("div", {className: "sidebar-section", ariaLabel:"Craftable resources"}, [
             $r("div", null,[
                 $r("div", {
                     className:"res-toolbar left",
                 }, 
                     $r("a", {
                             className:"link collapse", 
-                            onClick: this.toggleCollapsed
+                            onClick: this.toggleCollapsed,
+                            tabindex: 1,
+                            title: "显示/隐藏工艺制作",
                         },
-                        this.state.isCollapsed ? ">(" + $I("left.craft") + ")" : "v"
+                        this.state.isCollapsed ? ">(" + $I("left.craft") + ")" : $r("div", {
+                            className: "svg-icon down",
+                            src:"res/img/down.svg"
+                        })
                     )
                 ),
                 $r("div", {className:"res-toolbar right"}, 
                     $r("a", {
                         className: "link" + (this.state.isEditMode ? " toggled" : ""), 
-                        onClick: this.toggleEdit
-                    }, "⚙")
+                        onClick: this.toggleEdit,
+                        onKeyDown: this.onKeyDown,
+                        tabindex: 1
+                    },              
+                        $r("div", {
+                            className: "svg-icon gear",
+                            src:"res/img/gear.svg"
+                        })
+                    )
                 )
             ]),
             this.state.isCollapsed ? null :
@@ -668,6 +737,12 @@ WCraftTable = React.createClass({
                 $r("div", {className:"res-table craftTable"}, resRows)
             ])
         ]);
+    },
+
+    onKeyDown: function(event){
+        if (event.keyCode == 13){
+            this.toggleEdit();
+        }
     },
 
     toggleEdit: function(){
@@ -692,6 +767,19 @@ WPins = React.createClass({
                         this.props.game.diplomacy.tradeAll(race); 
                     }.bind(this, race)
                 });
+            }
+        }
+
+        for (var i in this.props.game.village.loadoutController.loadouts) {
+            var loadout = this.props.game.village.loadoutController.loadouts[i];
+
+            if (loadout.pinned){
+                pins.push({
+                    title: $I("left.loadout.do", [loadout.title]),
+                    handler: function(loadout){ 
+                        loadout.setLoadout(true);
+                    }.bind(this, loadout)
+                })
             }
         }
         return pins;
@@ -736,10 +824,13 @@ WLeftPanel = React.createClass({
         var game = this.state.game,
             reqRes = game.getRequiredResources(game.selectedBuilding);
 
+        var huntCost = 100 - game.getEffect("huntCatpowerDiscount");
         var catpower = game.resPool.get("manpower");
-        var huntCount = Math.floor(catpower.value / 100);
+        var huntCount = Math.floor(catpower.value / huntCost);
 
-        var showFastHunt = (catpower.value >= 100) && (!game.challenges.isActive("pacifism"));
+        var canHunt = ((game.resPool.get("paragon").value > 0) || (game.science.get("archery").researched)) &&
+            (!game.challenges.isActive("pacifism"));
+        var showFastHunt = (catpower.value >= huntCost);
 
         //---------- advisor ---------
         var showAdvisor = false;
@@ -764,7 +855,10 @@ WLeftPanel = React.createClass({
             }, 
                 $I("general.food.advisor.text")
             ), 
-            $r("div", {id:"fastHuntContainer", className:"pin-link", style:{display: (showFastHunt ? "block" : "none")}},
+            $r("div", {id:"fastHuntContainer", className:"pin-link", style:{
+                display: (canHunt ? "block" : "none"),
+                visibility: (showFastHunt ? "visible" : "hidden")
+            }},
                 $r("a", {href:"#", onClick: this.huntAll},
                     $I("left.hunt") + " (",
                     $r("span", {
@@ -779,11 +873,12 @@ WLeftPanel = React.createClass({
                     ")"
                 )
             ),
-            $r("div", {id:"fastPraiseContainer", className:"pin-link", style:{visibility:"hidden"}},
+            $r("div", {id:"fastPraiseContainer", className:"pin-link sidebar-section", style:{visibility:"hidden"}},
                 $r("a", {href:"#", onClick: this.praiseAll},
                     $I("left.praise")
                 )
-            ),              
+            ),             
+             
             $r(WPins, {game: game}),
             $r(WCraftTable, {resources: game.resPool.resources, reqRes: reqRes})
         ]);
@@ -819,9 +914,12 @@ WTooltip = React.createClass({
     },
 
     render: function(){
-        return $r("div", {className: "tooltip-block", 
+        return $r("div", {
+            tabIndex: this.props.tabindex ?? 0,
+            className: "tooltip-block", 
             onMouseOver: this.onMouseOver, 
-            onMouseOut: this.onMouseOut
+            onMouseOut: this.onMouseOut,
+            onKeyDown: this.onKeyDown
         }, [
             this.props.body || $r("div", {className: "tooltip-icon"}, "[?]"),
             this.state.showTooltip ? $r("div", {className: "tooltip-content"}, 
@@ -832,6 +930,12 @@ WTooltip = React.createClass({
 
     onMouseOver: function(){
         this.setState({showTooltip: true});
+    },
+
+    onKeyDown: function(e){
+        if (e.keyCode == 13){
+            this.setState({showTooltip: !this.state.showTooltip});
+        }
     },
 
     onMouseOut: function(){

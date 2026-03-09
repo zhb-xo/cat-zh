@@ -98,7 +98,8 @@ dojo.declare("classes.managers.PrestigeManager", com.nuclearunicorn.core.TabMana
 			"perks": ["divineProportion"]
 		},
 		effects:{
-			"priceRatio" : -(1 + Math.sqrt(5)) / 200	//Calculates the Golden Ratio
+			"priceRatio" : -(1 + Math.sqrt(5)) / 200,	//Calculates the Golden Ratio
+			"queueCap": 1
 		}
 	},{
 		name: "divineProportion",
@@ -111,7 +112,8 @@ dojo.declare("classes.managers.PrestigeManager", com.nuclearunicorn.core.TabMana
 			"perks": ["vitruvianFeline"]
 		},
 		effects:{
-			"priceRatio" : -16 / 900
+			"priceRatio" : -16 / 900,
+			"queueCap": 2
 		}
 	},{
 		name: "vitruvianFeline",
@@ -134,7 +136,8 @@ dojo.declare("classes.managers.PrestigeManager", com.nuclearunicorn.core.TabMana
 		unlocked: false,
 		researched: false,
 		effects:{
-			"priceRatio" : -0.0225
+			"priceRatio" : -0.0225,
+			"queueCap": 2
 		}
 	},{
 		name: "diplomacy",
@@ -146,6 +149,12 @@ dojo.declare("classes.managers.PrestigeManager", com.nuclearunicorn.core.TabMana
 		researched: false,
 		effects:{
 			"standingRatio" : 0.1
+		},
+		handler: function(game) { //Called when this is purchased
+			game.science.unlockRelations();
+		},
+		upgrades:{
+			policies: ["lizardRelationsEcologists"]
 		},
 		unlocks: {
 			"perks": ["zebraDiplomacy"]
@@ -539,11 +548,14 @@ dojo.declare("classes.ui.PrestigeBtnController", com.nuclearunicorn.game.ui.Buil
         return model.metaCached;
     },
 
-   	buyItem: function(model, event, callback) {
+   	buyItem: function(model, event) {
 		if (this.game.science.get("metaphysics").researched) {
-			this.inherited(arguments);
+			return this.inherited(arguments);
 		} else {
-			callback(false);
+			return {
+				itemBought: false,
+				reason: "not-unlocked"
+			};
 		}
 	},
 
@@ -560,6 +572,12 @@ dojo.declare("classes.ui.PrestigeBtnController", com.nuclearunicorn.game.ui.Buil
 dojo.declare("classes.ui.BurnParagonBtnController", com.nuclearunicorn.game.ui.ButtonModernController, {
 	updateVisible: function(model){
 		model.visible = this.game.resPool.get("paragon").value > 0;
+	}
+});
+
+dojo.declare("classes.ui.turnHGOffButtonController", com.nuclearunicorn.game.ui.ButtonModernController, {
+	updateVisible: function(model){
+		model.visible = (this.game.religion.activeHolyGenocide > 0) || (this.game.religion.getTU("holyGenocide").on > 0);
 	}
 });
 
@@ -592,6 +610,16 @@ dojo.declare("classes.ui.PrestigePanel", com.nuclearunicorn.game.ui.Panel, {
 		}, self.game);
 		buttonBP.render(content);
 		self.addChild(buttonBP);
+		var buttonOffHG = new com.nuclearunicorn.game.ui.ButtonModern({
+			name : $I("prestige.btn.turnHGOff.label"),
+			description: $I("prestige.btn.turnHGOff.desc"),
+			handler: dojo.hitch(this, function(){
+				this.game.religion.turnHGOff();
+			}),
+			controller: new classes.ui.turnHGOffButtonController(self.game)
+		}, self.game);
+		buttonOffHG.render(content);
+		self.addChild(buttonOffHG);
 		//---------------------------------------------------------------------
 	}
 
